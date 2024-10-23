@@ -1,29 +1,76 @@
-use dotenv::dotenv;
+use reqwest::blocking::Client;
 use reqwest::header::HeaderMap;
-use reqwest::Client;
+use serde::Deserialize;
 use serde_json::{json, Value};
-use std::env;
+use std::fs;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Load environment variables from .env file
-    dotenv().ok();
+#[derive(Debug, Deserialize)]
+struct DataCakeConfig {
+    key: String,
+}
 
-    // Get the required environment variables
-    let api_key = env::var("DATACAKE_KEY").expect("DATACAKE_KEY not found in .env");
-    let device_id = env::var("DEVICE_ID").expect("DEVICE_ID not found in .env");
-    let slack_token = env::var("SLACK_TOKEN").expect("SLACK_TOKEN not found in .env");
-    let slack_channel = env::var("SLACK_CHANNEL").expect("SLACK_CHANNEL not found in .env");
+#[derive(Debug, Deserialize)]
+struct SlackConfig {
+    token: String,
+    channel: String,
+}
 
-    // Create a reqwest client
-    let client = Client::builder().build()?;
+#[derive(Debug, Deserialize)]
+struct Config {
+    datacake: DataCakeConfig,
+    device: String,
+    threshold: f64,
+    slack: SlackConfig,
+}
 
-    // Set up headers for the Datacake API request
+fn main() {
+    let config = load_config("config.yml");
+    let co2_value = measure_co2(&config.datacake.key, &config.device);
+    println!("CO2 Concentration Value: {:.2} ppm", co2_value);
+
+    if co2_value > config.threshold {
+        println!("CO2 concentration exceeds threshold! Sending Slack message...");
+        send_slack_alert(
+            &config.slack.token,
+            &config.slack.channel,
+            co2_value,
+            config.threshold,
+        );
+    }
+}
+
+fn load_config(file_path: &str) -> Config {
+    // Read the configuration file and expect it to succeed, panic if it fails
+    let config_content = fs::read_to_string(file_path).expect(
+        "Failed to read configuration file. Make sure 'config.yml' exists and is readable.",
+    );
+
+    // Parse the YAML content and expect successful parsing, panic if it fails
+    let config: Config = serde_yaml::from_str(&config_content)
+        .expect("Failed to parse configuration file. Ensure it is in correct YAML format.");
+
+    config
+}
+
+fn measure_co2(api_key: &str, device_id: &str) -> f64 {
+    let client = Client::builder()
+        .build()
+        .expect("Failed to build HTTP client.");
+
     let mut headers = HeaderMap::new();
-    headers.insert("Authorization", format!("Token {}", api_key).parse()?);
-    headers.insert("Content-Type", "application/json".parse()?);
+    headers.insert(
+        "Authorization",
+        format!("Token {}", api_key)
+            .parse()
+            .expect("Invalid API key."),
+    );
+    headers.insert(
+        "Content-Type",
+        "application/json"
+            .parse()
+            .expect("Invalid content type header."),
+    );
 
-    // Construct the GraphQL query
     let query = json!({
         "query": "query($deviceId:String!){device(deviceId:$deviceId){currentMeasurements(allActiveFields:true){value field{verboseFieldName fieldName}modified}}}",
         "variables": {
@@ -31,53 +78,90 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // Send the request to the Datacake API
     let response = client
         .post("https://api.datacake.co/graphql/")
         .headers(headers)
         .json(&query)
         .send()
-        .await?;
+        .expect("Failed to send request to Datacake API.");
 
-    // Parse the response body as JSON
-    let body = response.text().await?;
-    let json_response: Value = serde_json::from_str(&body)?;
+    let body = response
+        .text()
+        .expect("Failed to read response body from Datacake API.");
 
-    // Extract the CO2 concentration measurement
-    let mut co2_message = String::from("No CO2 measurements found.");
+    let json_response: Value =
+        serde_json::from_str(&body).expect("Failed to parse response JSON from Datacake API.");
+
     if let Some(measurements) = json_response["data"]["device"]["currentMeasurements"].as_array() {
         if let Some(co2_value) = measurements
             .iter()
             .find(|m| m["field"]["fieldName"] == "CO2_CONCENTRATION")
             .and_then(|m| m["value"].as_f64())
         {
-            co2_message = format!("CO2 Concentration Value: {:.2} ppm", co2_value);
-            println!("{}", co2_message); // Print out the measurement
+            return co2_value;
         }
     }
 
-    // Set up headers for the Slack API request
-    let mut slack_headers = HeaderMap::new();
-    slack_headers.insert("Authorization", format!("Bearer {}", slack_token).parse()?);
-    slack_headers.insert("Content-Type", "application/json".parse()?);
+    panic!("CO2 measurement not found in the response from Datacake API.");
+}
 
-    // Construct the Slack message payload
+fn send_slack_alert(token: &str, slack_channel: &str, co2_value: f64, threshold: f64) {
+    let client = Client::builder()
+        .build()
+        .expect("Failed to build HTTP client.");
+
+    let mut slack_headers = HeaderMap::new();
+    slack_headers.insert(
+        "Authorization",
+        format!("Bearer {}", token)
+            .parse()
+            .expect("Invalid Slack token."),
+    );
+    slack_headers.insert(
+        "Content-Type",
+        "application/json"
+            .parse()
+            .expect("Invalid content type header."),
+    );
+
     let slack_message = json!({
         "channel": slack_channel,
-        "text": co2_message
+        "blocks": [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "Hey there, 👋 @channel"
+                }
+            },
+            {
+                "type": "divider"
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "plain_text",
+                    "text": format!("🚨 The office CO2 concentration has exceeded the safe threshold of {:.2}ppm. Time to open the windows and let in some fresh air! 🍃", threshold),
+                    "emoji": true
+                }
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "plain_text",
+                        "text": format!("🌡️ Current CO2 Level: {:.2}ppm.", co2_value),
+                        "emoji": true
+                    }
+                ]
+            }
+        ]
     });
 
-    // Send the message to Slack
-    let slack_response = client
+    client
         .post("https://slack.com/api/chat.postMessage")
         .headers(slack_headers)
         .json(&slack_message)
         .send()
-        .await?;
-
-    // Check if the Slack message was sent successfully
-    let slack_body = slack_response.text().await?;
-    println!("Slack Response: {}", slack_body);
-
-    Ok(())
+        .expect("Failed to send message to Slack.");
 }
