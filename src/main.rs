@@ -13,6 +13,7 @@ struct DataCakeConfig {
 struct SlackConfig {
     token: String,
     channel: String,
+    message: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -34,7 +35,7 @@ fn main() {
             &config.slack.token,
             &config.slack.channel,
             co2_value,
-            config.threshold,
+            &config.slack.message,
         );
     }
 }
@@ -105,7 +106,7 @@ fn measure_co2(api_key: &str, device_id: &str) -> f64 {
     panic!("CO2 measurement not found in the response from Datacake API.");
 }
 
-fn send_slack_alert(token: &str, slack_channel: &str, co2_value: f64, threshold: f64) {
+fn send_slack_alert(token: &str, slack_channel: &str, co2_value: f64, message: &str) {
     let client = Client::builder()
         .build()
         .expect("Failed to build HTTP client.");
@@ -141,7 +142,7 @@ fn send_slack_alert(token: &str, slack_channel: &str, co2_value: f64, threshold:
                 "type": "section",
                 "text": {
                     "type": "plain_text",
-                    "text": format!("🚨 The office CO2 concentration has exceeded the safe threshold of {:.2}ppm. Time to open the windows and let in some fresh air! 🍃", threshold),
+                    "text": message,
                     "emoji": true
                 }
             },
