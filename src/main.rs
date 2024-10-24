@@ -53,12 +53,10 @@ fn main() {
 }
 
 fn load_config(file_path: &str) -> Config {
-    // Read the configuration file and expect it to succeed, panic if it fails
     let config_content = fs::read_to_string(file_path).expect(
         "Failed to read configuration file. Make sure 'config.yml' exists and is readable.",
     );
 
-    // Parse the YAML content and expect successful parsing, panic if it fails
     let config: Config = serde_yaml::from_str(&config_content)
         .expect("Failed to parse configuration file. Ensure it is in correct YAML format.");
 
