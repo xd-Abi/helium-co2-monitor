@@ -1,3 +1,4 @@
+use clap::Parser;
 use reqwest::blocking::Client;
 use reqwest::header::HeaderMap;
 use serde::Deserialize;
@@ -24,8 +25,19 @@ struct Config {
     slack: SlackConfig,
 }
 
+#[derive(Parser, Debug)]
+#[command(name = "CO2 Alert")]
+#[command(author = "Abinayan Sureskumar")]
+#[command(version = "1.0")]
+#[command(about = "CO2 Monitoring and Slack alert system", long_about = None)]
+struct Args {
+    #[arg(long, default_value = "config.yml")]
+    config: String,
+}
+
 fn main() {
-    let config = load_config("config.yml");
+    let args = Args::parse();
+    let config = load_config(&args.config);
     let co2_value = measure_co2(&config.datacake.key, &config.device);
     println!("CO2 Concentration Value: {:.2} ppm", co2_value);
 

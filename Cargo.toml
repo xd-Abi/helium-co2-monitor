@@ -6,7 +6,8 @@ authors = ["Abinayan Sureskumar"]
 
 [dependencies]
 reqwest = { version = "0.11", features = ["blocking", "json"] }
+clap = { version = "4.0", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1", features = ["full"] }
 serde_yaml = "0.9"
